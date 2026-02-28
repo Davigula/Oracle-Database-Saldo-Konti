@@ -1,0 +1,1 @@
+Novi git repositorij za oracle database
