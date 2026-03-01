@@ -1,0 +1,4 @@
+UPDATE david_order
+        SET status = 'CANCELLED',
+            total_amount = 0
+        WHERE order_id = p_order_id;
