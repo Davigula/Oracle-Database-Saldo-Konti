@@ -1,0 +1,363 @@
+create table david_customers (
+    customer_id NUMBER PRIMARY KEY,
+    first_name VARCHAR2(100),
+    last_name VARCHAR2(100),
+    email VARCHAR2(100) not null unique,
+    created_at DATE default SYSDATE NOT NULL
+);
+
+create table david_products (
+    product_id NUMBER PRIMARY KEY,
+    name VARCHAR2(100),
+    price NUMBER(10,2),
+    stock_quantity number default 0
+        constraint check_stock
+        check (stock_quantity >= 0),
+    active VARCHAR2(1) 
+        CONSTRAINT chk_product_active
+        CHECK (active in ('Y', 'N'))
+ );
+  
+ create table david_order (
+    order_id NUMBER PRIMARY KEY,
+    customer_id number,
+    FOREIGN KEY (customer_id) REFERENCES david_customers(customer_id),
+    order_date DATE,
+    status VARCHAR(20) 
+        CONSTRAINT chk_order_status 
+        CHECK(status IN ('CANCELLED', 'CREATED', 'COMPLETED')),
+    total_amount NUMBER(10,2) DEFAULT 0 NOT NULL
+ );
+
+
+alter table david_order ADD (
+    created_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    created_at DATE DEFAULT SYSDATE NOT NULL,
+    modified_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    modified_at DATE DEFAULT SYSDATE NOT NULL
+);
+
+create sequence order_seq
+MINVALUE 21
+INCREMENT BY 1
+CACHE 20;
+
+create SEQUENCE order_id_seq
+    MINVALUE 20
+    START WITH 20
+    INCREMENT BY 1
+    CACHE 20;
+
+
+
+CREATE OR REPLACE TRIGGER trg_david_orders
+BEFORE UPDATE ON david_order
+FOR EACH ROW
+BEGIN 
+    IF UPDATING THEN
+        :NEW.modified_by := NVL(SYS_CONTEXT('USERENV', 'CLIENT_IDENTIFIER'), USER);
+        :NEW.modified_at := SYSDATE;
+    END IF;
+END;  
+/
+  
+create table david_order_items (
+    order_item_id NUMBER PRIMARY KEY,
+    order_id number,
+    product_id number,
+    FOREIGN KEY (order_id) REFERENCES david_order(order_id),
+    FOREIGN KEY (product_id) REFERENCES david_products(product_id),
+    quantity number,
+    price_at_order NUMBER(10,2)
+ );
+ 
+create index idx_order_customer ON david_order(customer_id);
+create index idx_order_items ON david_order_items(order_id);
+create index idx_order_items_product ON david_order_items(product_id);
+
+
+alter table david_order ADD (
+    created_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    created_at DATE DEFAULT SYSDATE NOT NULL,
+    modified_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    modified_at DATE DEFAULT SYSDATE NOT NULL
+);
+
+alter table david_customers ADD (
+    created_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    modified_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    modified_at DATE DEFAULT SYSDATE NOT NULL
+);
+
+alter table david_products ADD (
+    created_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    created_at DATE DEFAULT SYSDATE NOT NULL,
+    modified_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    modified_at DATE DEFAULT SYSDATE NOT NULL
+);
+
+alter table david_order_items ADD (
+    created_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    created_at DATE DEFAULT SYSDATE NOT NULL,
+    modified_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    modified_at DATE DEFAULT SYSDATE NOT NULL
+);
+
+-- Funkcija 1: get_order_total(p_order_id)
+-- Vraća ukupnu vrijednost narudžbe:
+CREATE OR REPLACE FUNCTION get_order_total(p_order_id NUMBER)
+RETURN NUMBER
+IS
+    v_total NUMBER(10,2);
+    v_exists NUMBER;
+BEGIN
+    -- provjera postoji li narudžba
+
+    SELECT COUNT(*)
+    INTO v_exists
+    FROM david_order
+    WHERE order_id = p_order_id;
+
+    IF v_exists = 0 THEN
+        RAISE_APPLICATION_ERROR(-20001, 'Order does not exist');
+    END IF;
+
+    SELECT NVL(SUM(quantity * price_at_order), 0)
+    INTO v_total
+    FROM david_order_items
+    WHERE order_id = p_order_id;
+
+    RETURN v_total;
+END;
+/
+
+-- Funkcija 2: check_stock(p_product_id, p_quantity)
+-- Vraća TRUE/FALSE ovisno ima li dovoljno zaliha.
+CREATE OR REPLACE FUNCTION check_stock(p_product_id NUMBER, p_quantity NUMBER)
+RETURN BOOLEAN
+IS 
+stock_value DAVID_PRODUCTS.STOCK_QUANTITY%TYPE; 
+BEGIN
+    SELECT stock_quantity 
+    into stock_value
+    FROM david_products p
+    WHERE product_id = p_product_id;
+    
+    if stock_value >= p_quantity then return TRUE;
+    else return FALSE;
+    end if;
+        
+    EXCEPTION 
+       WHEN no_data_found then
+       raise_application_error(-20002, 'Product not found!');
+    
+END check_stock;
+/
+
+-- PACKAGE 
+-- Napraviti package:
+
+CREATE OR REPLACE PACKAGE order_pkg IS
+    
+    ex_customer_not_found EXCEPTION;
+    ex_product_not_found  EXCEPTION;
+    ex_no_stock           EXCEPTION;
+    ex_order_not_found    EXCEPTION;
+
+    FUNCTION get_order_total(p_order_id NUMBER) RETURN NUMBER;
+    
+    FUNCTION check_stock(p_product_id NUMBER, p_quantity NUMBER) RETURN BOOLEAN;  
+    
+    PROCEDURE create_order(p_customer_id NUMBER, p_product_id  NUMBER, p_quantity NUMBER);
+    
+    PROCEDURE cancel_order(p_order_id NUMBER);
+        
+END order_pkg;
+/
+
+CREATE OR REPLACE PACKAGE BODY order_pkg IS
+
+    FUNCTION get_order_total(p_order_id NUMBER) RETURN NUMBER IS v_total NUMBER(10,2);
+    BEGIN
+        SELECT NVL(SUM(quantity * price_at_order), 0) INTO v_total
+        FROM david_order_items
+        WHERE order_id = p_order_id;
+
+        RETURN v_total;
+
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN RAISE_APPLICATION_ERROR(-20001, 'Order not found');
+    END;
+    
+    FUNCTION check_stock(p_product_id NUMBER, p_quantity NUMBER) RETURN BOOLEAN IS v_stock david_products.stock_quantity%TYPE;
+    BEGIN
+        SELECT stock_quantity
+        INTO v_stock
+        FROM david_products
+        WHERE product_id = p_product_id;
+
+        IF v_stock < p_quantity THEN RAISE ex_no_stock;
+        END IF;
+
+        RETURN TRUE;
+
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN RAISE ex_product_not_found;
+    END;
+    
+        PROCEDURE create_order(p_customer_id NUMBER, p_product_id  NUMBER, p_quantity NUMBER) IS
+        v_order_id NUMBER;
+        v_price    david_products.price%TYPE;
+    BEGIN
+        
+        
+        BEGIN
+            SELECT 1 INTO v_order_id
+            FROM david_customers
+            WHERE customer_id = p_customer_id;
+        EXCEPTION
+            WHEN NO_DATA_FOUND THEN
+                RAISE ex_customer_not_found;
+        END;
+
+        SELECT price INTO v_price
+        FROM david_products
+        WHERE product_id = p_product_id;
+
+        -- order_pkg.check_stock(p_product_id, p_quantity);
+
+        SELECT david_order_seq.NEXTVAL INTO v_order_id
+        FROM dual;
+
+        INSERT INTO david_order (order_id, customer_id, order_date, status, total_amount)
+        VALUES (v_order_id, p_customer_id, SYSDATE, 'CREATED', 0);
+
+        INSERT INTO david_order_items (
+            order_item_id,
+            order_id,
+            product_id,
+            quantity,
+            price_at_order
+        )
+        VALUES (
+            david_order_items_seq.NEXTVAL,
+            v_order_id,
+            p_product_id,
+            p_quantity,
+            v_price
+        );
+
+        UPDATE david_products
+        SET stock_quantity = stock_quantity - p_quantity
+        WHERE product_id = p_product_id;
+
+        UPDATE david_order
+        SET total_amount = get_order_total(v_order_id)
+        WHERE order_id = v_order_id;
+
+        COMMIT;
+
+    EXCEPTION
+        WHEN ex_customer_not_found THEN
+            ROLLBACK;
+            RAISE_APPLICATION_ERROR(-20010, 'Customer not found');
+
+        WHEN ex_product_not_found THEN
+            ROLLBACK;
+            RAISE_APPLICATION_ERROR(-20011, 'Product not found');
+
+        WHEN ex_no_stock THEN
+            ROLLBACK;
+            RAISE_APPLICATION_ERROR(-20012, 'Not enough stock');
+
+        WHEN OTHERS THEN
+            ROLLBACK;
+            RAISE;
+    END;
+    
+    
+        PROCEDURE cancel_order(
+        p_order_id NUMBER
+    )
+    IS
+    BEGIN
+
+        -- vrati stock
+        FOR rec IN (
+            SELECT product_id, quantity
+            FROM david_order_items
+            WHERE order_id = p_order_id
+        )
+        LOOP
+            UPDATE david_products
+            SET stock_quantity = stock_quantity + rec.quantity
+            WHERE product_id = rec.product_id;
+        END LOOP;
+
+        -- update status
+        UPDATE david_order
+        SET status = 'CANCELLED',
+            total_amount = 0
+        WHERE order_id = p_order_id;
+
+        COMMIT;
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            ROLLBACK;
+            RAISE;
+    END;
+
+
+END order_pkg;
+/
+
+--Ispis svih narudžbi s imenom kupca (INNER JOIN) 
+select first_name, last_name, order_id
+from david_customers c
+join david_order o on c.customer_id = o.customer_id;
+
+--Ispis svih proizvoda i koliko puta su naručeni (LEFT JOIN + GROUP BY)
+select 
+    p.product_id,
+    p.name,
+    count(oi.order_item_id) as times_ordered
+from david_products p
+left join david_order_items oi 
+    on p.product_id = oi.product_id
+group by 
+    p.product_id,
+    p.name
+order by times_ordered desc;
+
+--Ispis kupaca koji nikad nisu naručili (LEFT JOIN + WHERE IS NULL)
+select c.*
+from david_customers c
+left join david_order o on c.customer_id = o.customer_id
+where o.order_id is null;
+
+--Ukupan promet po kupcu
+select c.customer_id, c.FIRST_NAME, c.last_name, nvl(sum(o.total_amount),0)
+from david_customers c
+left join david_order o on  c.customer_id = o.customer_id
+group by c.customer_id, c.FIRST_NAME, c.last_name;
+
+
+
+begin 
+    ORDER_PKG.CANCEL_ORDER(8);
+end;
+/
+
+select o.order_id, o.customer_id, o.STATUS, p.STOCK_QUANTITY, oi.QUANTITY 
+from david_order o
+left join david_order_items oi on o.order_id = oi.ORDER_ID
+left join david_products p on p.product_id = oi.product_id;
+
+
+begin
+ DBMS_SESSION.set_identifier('hellen_doore');
+end;
+
+insert into david_order(order_id, created_by, order_date, status, total_amount) VALUES (order_seq.nextval, SYS_CONTEXT('USERENV', 'CLIENT_IDENTIFIER'),SYSDATE,'COMPLETED', 2026);
+UPDATE DAVID_ORDER SET TOTAL_AMOUNT = 2397 WHERE ORDER_ID =28;
