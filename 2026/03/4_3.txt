@@ -1,0 +1,30 @@
+alter table orders ADD (
+    created_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    created_at DATE DEFAULT SYSDATE NOT NULL,
+    modified_by VARCHAR(20) DEFAULT SYS_CONTEXT('USERENV', 'SESSION_USER'),
+    modified_at DATE DEFAULT SYSDATE NOT NULL
+);
+
+begin
+ DBMS_SESSION.set_identifier('hellen_doore');
+end;
+
+select * from orders;
+
+
+create or replace trigger trigger_stores
+before update on stores
+for each row
+begin 
+    if updating then 
+        :NEW.modified_by := NVL(SYS_CONTEXt('USERENV', 'CLIENT_IDENTIFIER'), user);
+        :NEW.modified_at := sysdate;
+
+    END IF;
+
+END;
+/
+
+
+insert into order_items (order_id, line_item_id, product_id, unit_price, quantity) values (5, 3, 3, 14, 3)  ;
+UPDATE DAVID_ORDER SET TOTAL_AMOUNT = 2397 WHERE ORDER_ID =28;
