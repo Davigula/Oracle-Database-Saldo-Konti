@@ -1,0 +1,45 @@
+-- Napiši view koji groupira podatke po narudžbi
+
+CREATE OR REPLACE VIEW view_order_summary AS
+SELECT 
+    o.order_id,
+    c.customer_id,
+    c.full_name,
+    o.order_datetime,
+    o.order_status,
+    NVL(SUM(oi.quantity * oi.unit_price),0) AS total_amount
+FROM orders o
+JOIN customers c
+    ON o.customer_id = c.customer_id
+LEFT JOIN order_items oi
+    ON oi.order_id = o.order_id
+GROUP BY 
+    o.order_id,
+    c.customer_id,
+    c.full_name,
+    o.order_datetime,
+    o.order_status;
+
+-- Napiši view koji će pomoći firmi odlučiti koji kupac će dobiti prikladan popust s obzirom koliko troši i koliko naručuje
+CREATE OR REPLACE VIEW customer_summary_view AS
+SELECT 
+    c.customer_id,
+    c.full_name,
+    COUNT(o.order_id) AS total_orders,
+    NVL(SUM(oi.quantity * oi.unit_price),0) AS total_spent
+FROM customers c
+LEFT JOIN orders o 
+    ON o.customer_id = c.customer_id
+LEFT JOIN order_items oi 
+    ON oi.order_id = o.order_id
+GROUP BY 
+    c.customer_id,
+    c.full_name;
+
+
+
+CREATE OR REPLACE VIEW active_products_view AS
+SELECT p.product_name, order_items.*
+FROM products p 
+left join order_items on p.product_id = order_items.product_id
+WHERE quantity > 0;
