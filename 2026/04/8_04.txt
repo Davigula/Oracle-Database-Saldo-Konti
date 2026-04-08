@@ -1,0 +1,8 @@
+-- zaključava proizvod 1
+SELECT * FROM products
+WHERE product_id = 1
+FOR UPDATE;
+
+SELECT * FROM products
+WHERE product_id = 2
+FOR UPDATE;
