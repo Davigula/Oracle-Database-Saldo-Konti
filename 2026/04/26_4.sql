@@ -1,0 +1,33 @@
+CREATE OR REPLACE PROCEDURE update_price IS
+  l_price NUMBER;
+BEGIN
+  l_price := 10 / 0; -- bug
+
+EXCEPTION
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('SQLCODE: ' || SQLCODE);
+    DBMS_OUTPUT.PUT_LINE('SQLERRM: ' || SQLERRM);
+    DBMS_OUTPUT.PUT_LINE('STACK: ' || DBMS_UTILITY.format_error_stack);
+    DBMS_OUTPUT.PUT_LINE('BACKTRACE: ' || DBMS_UTILITY.format_error_backtrace);
+END;
+
+begin
+    update_price;
+end;
+
+
+
+BEGIN
+  BEGIN
+    RAISE_APPLICATION_ERROR(-20001, 'Test');
+  EXCEPTION
+    WHEN OTHERS THEN
+      NULL;
+  END;
+
+  RAISE_APPLICATION_ERROR(-20002, 'Second error');
+
+EXCEPTION
+  WHEN OTHERS THEN
+    DBMS_OUTPUT.PUT_LINE('Outer: ' || SQLERRM);
+END;
