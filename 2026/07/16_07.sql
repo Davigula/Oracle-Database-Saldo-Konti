@@ -1,3 +1,8 @@
+select * from orders;
+
+insert into orders (order_id, order_datetime, customer_id, order_status, store_id)
+values (312, sysdate, 43, 'NEW', 1)
+
 SELECT constraint_name,
        search_condition
 FROM user_constraints
