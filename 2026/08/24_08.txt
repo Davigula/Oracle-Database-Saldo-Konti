@@ -1,0 +1,23 @@
+CREATE OR REPLACE PROCEDURE find_customer (
+    p_customer_id VARCHAR2
+)
+IS
+    l_sql   VARCHAR2(1000);
+BEGIN
+
+    l_sql :=
+        'SELECT *
+           FROM customers
+          WHERE customer_id = ' || p_customer_id;
+
+    DBMS_OUTPUT.PUT_LINE(l_sql);
+END;
+/
+
+begin 
+    find_customer('500234 or 1=1');
+end;
+
+SELECT *
+           FROM customers
+          WHERE customer_id = 500234 or 1=1
